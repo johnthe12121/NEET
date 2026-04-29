@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEET Prep Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style> .hidden { display: none !important; } </style>
+</head>
+<body class="bg-indigo-50 min-h-screen font-sans text-gray-800">
+
+    <nav class="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center relative z-10">
+        <div class="font-bold text-xl cursor-pointer" onclick="loadDashboard()">NEET Prep Platform</div>
+        <div id="nav-user-info" class="hidden flex items-center space-x-4">
+            <span id="nav-username" class="font-medium"></span>
+            <button onclick="logout()" class="text-sm bg-indigo-800 px-3 py-1 rounded hover:bg-indigo-900 transition">Logout</button>
+        </div>
+    </nav>
+
+    <!-- FLOATING NEET TIMER -->
+    <div id="timer-display" class="hidden fixed top-20 right-6 z-50 bg-white border-2 border-red-500 text-red-600 px-4 py-2 rounded-full font-mono text-xl shadow-lg flex items-center space-x-2">
+        <span>⏱️</span> <span id="timer-text" class="font-bold">03:20:00</span>
+    </div>
+
+    <div class="max-w-4xl mx-auto p-4 mt-6">
+        
+        <!-- AUTH VIEW -->
+        <div id="auth-view" class="hidden bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto mt-10">
+            <h1 class="text-3xl font-bold text-indigo-600 mb-6 text-center">Welcome Back!</h1>
+            <div class="space-y-4">
+                <input type="text" id="username" placeholder="Username" class="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-400">
+                <input type="password" id="password" placeholder="Password" class="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-400">
+                <div class="flex space-x-4 pt-2">
+                    <button onclick="login()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow hover:bg-indigo-700 transition">Log In</button>
+                </div>
+                <p id="auth-error" class="text-red-500 text-center text-sm font-bold mt-2 hidden"></p>
+            </div>
+        </div>
+
+        <!-- DASHBOARD VIEW -->
+        <div id="dashboard-view" class="hidden space-y-6">
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Available Tests -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">Available Tests</h2>
+                    <div id="test-list" class="space-y-3 max-h-96 overflow-y-auto pr-2"></div>
+                </div>
+
+                <!-- Graph -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">My Confidence Graph</h2>
+                    <canvas id="dashboardChart" height="200"></canvas>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Past Results</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-50 text-gray-600 border-b">
+                                <th class="p-3">Date</th>
+                                <th class="p-3">Test Name</th>
+                                <th class="p-3">Score</th>
+                                <th class="p-3">Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TEST VIEW -->
+        <div id="test-view" class="hidden bg-white p-6 rounded-xl shadow-lg mt-14">
+            <button onclick="abortTest()" class="text-indigo-600 font-bold mb-4">← Abort & Return to Dashboard</button>
+            <h1 id="test-title" class="text-3xl font-extrabold text-gray-800 mb-2"></h1>
+            <p class="text-gray-500 mb-8 font-medium">Standard NEET Time: 3 hours 20 minutes. Focus on accuracy!</p>
+            <div id="questions-container" class="space-y-8"></div>
+            <button onclick="submitTest()" class="mt-10 w-full bg-indigo-600 text-white font-bold text-xl px-6 py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Submit Answers</button>
+        </div>
+
+        <!-- RESULT VIEW -->
+        <div id="result-view" class="hidden bg-white p-6 rounded-xl shadow-lg mt-10">
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold text-indigo-600 mb-2">Results are in!</h1>
+                <div class="mt-4 inline-block bg-indigo-100 text-indigo-800 px-8 py-4 rounded-full text-3xl font-extrabold shadow-sm">
+                    Score: <span id="result-score"></span> / <span id="result-total"></span> (<span id="result-percent"></span>%)
+                </div>
+            </div>
+            <h3 class="text-2xl font-bold border-b-2 border-indigo-100 pb-2 mb-6">Detailed Analysis</h3>
+            <div id="analysis-container" class="space-y-4"></div>
+            <button onclick="loadDashboard()" class="mt-8 w-full bg-gray-100 text-gray-800 font-bold px-6 py-3 rounded-lg hover:bg-gray-200 transition">Back to Dashboard</button>
+        </div>
+
+    </div>
+
+    <script>
+        let currentQuestions = [];
+        let userAnswers = {};
+        let activeTestId = null;
+        let chartInstance = null;
+        
+        // Timer Variables
+        let timerInterval = null;
+        const NEET_SECONDS = (3 * 60 * 60) + (20 * 60); // 3 hrs 20 mins
+
+        checkAuth();
+
+        function hideAll() {
+            ['auth-view', 'dashboard-view', 'test-view', 'result-view'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+        }
+
+        async function checkAuth() {
+            const res = await fetch('/api/auth/status');
+            const data = await res.json();
+            hideAll();
+            if (data.logged_in) {
+                document.getElementById('nav-user-info').classList.remove('hidden');
+                document.getElementById('nav-username').innerText = `Hello, ${data.username}`;
+                loadDashboard();
+            } else {
+                document.getElementById('nav-user-info').classList.add('hidden');
+                document.getElementById('auth-view').classList.remove('hidden');
+            }
+        }
+
+        async function login() {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
+            });
+        async function register() {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
+            });
+            if (res.ok) checkAuth();
+            else alert("Registration failed. Username might be taken.");
+        }
+
+        async function logout() {
+            stopTimer(); // Added to ensure the timer stops and hides on logout
+            await fetch('/api/auth/logout', { method: 'POST' });
+            checkAuth();
+        }
+
+        async function loadDashboard() {
+            stopTimer(); // Ensure timer hides if returning to dashboard
+            hideAll();
+            const res = await fetch('/api/dashboard');
+            if (!res.ok) return checkAuth();
+            const data = await res.json();
+
+            const testList = document.getElementById('test-list');
+            testList.innerHTML = data.tests.length === 0 ? '<p class="text-gray-500">No tests available yet.</p>' : '';
+            data.tests.forEach(t => {
+                testList.innerHTML += `
+                    <div class="flex justify-between items-center p-4 bg-gray-50 rounded-lg border hover:border-indigo-300 transition">
+                        <div>
+                            <p class="font-bold text-gray-800">${t.title}</p>
+                            <p class="text-xs text-gray-500">Added: ${t.created_at}</p>
+                        </div>
+                        <button onclick="startTest('${t.id}')" class="bg-indigo-100 text-indigo-700 font-bold px-4 py-2 rounded hover:bg-indigo-200">Take Test</button>
+                    </div>
+                `;
+            });
+
+            const hTable = document.getElementById('history-table');
+            hTable.innerHTML = '';
+            [...data.history].reverse().forEach(h => {
+                hTable.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3 text-sm">${h.date}</td>
+                        <td class="p-3 font-medium">${h.title}</td>
+                        <td class="p-3">${h.score} / ${h.total}</td>
+                        <td class="p-3 font-bold text-${h.percentage >= 80 ? 'green' : 'indigo'}-600">${h.percentage}%</td>
+                    </tr>
+                `;
+            });
+
+            const ctx = document.getElementById('dashboardChart').getContext('2d');
+            if(chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.history.map((_, i) => `Test ${i + 1}`),
+                    datasets: [{
+                        label: 'Score %', data: data.history.map(h => h.percentage),
+                        borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.2)',
+                        borderWidth: 3, fill: true, tension: 0.4
+                    }]
+                },
+                options: { scales: { y: { beginAtZero: true, max: 100 } } }
+            });
+
+            document.getElementById('dashboard-view').classList.remove('hidden');
+        }
+
+        function runTimer() {
+            let timeRemaining = NEET_SECONDS;
+            document.getElementById('timer-display').classList.remove('hidden');
+            
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                let hrs = Math.floor(timeRemaining / 3600);
+                let mins = Math.floor((timeRemaining % 3600) / 60);
+                let secs = timeRemaining % 60;
+                
+                document.getElementById('timer-text').innerText = 
+                    `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                
+                if (timeRemaining <= 0) {
+                    stopTimer();
+                    alert("⏰ Time is up! Your test is being automatically submitted.");
+                    submitTest(true); // pass true for auto-submit
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if(timerInterval) clearInterval(timerInterval);
+            document.getElementById('timer-display').classList.add('hidden');
+        }
+
+        function abortTest() {
+            if(confirm("Are you sure you want to exit? Your progress won't be saved.")) {
+                stopTimer();
+                loadDashboard();
+            }
+        }
+
+        async function startTest(id) {
+            activeTestId = id;
+            const res = await fetch(`/api/test/${id}`);
+            const data = await res.json();
+            
+            hideAll();
+            currentQuestions = data.questions;
+            userAnswers = {};
+            
+            document.getElementById('test-title').innerText = data.title;
+            const container = document.getElementById('questions-container');
+            container.innerHTML = '';
+            
+            currentQuestions.forEach((q, index) => {
+                let optionsHtml = q.options.map(opt => `
+                    <label class="block p-4 border-2 border-gray-100 rounded-lg cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition mb-2">
+                        <input type="radio" name="${q.id}" value="${opt}" onchange="userAnswers['${q.id}'] = '${opt}'" class="mr-3 w-4 h-4 text-indigo-600">
+                        <span class="font-medium text-gray-700">${opt}</span>
+                    </label>
+                `).join('');
+                container.innerHTML += `
+                    <div class="bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
+                        <h3 class="text-lg font-bold mb-4 text-gray-900"><span class="text-indigo-600 mr-1">${index + 1}.</span> ${q.text}</h3>
+                        <div class="space-y-2">${optionsHtml}</div>
+                    </div>`;
+            });
+            
+            document.getElementById('test-view').classList.remove('hidden');
+            runTimer(); // START THE TIMER
+        }
+
+        async function submitTest(autoSubmit = false) {
+            if (!autoSubmit && Object.keys(userAnswers).length < currentQuestions.length) {
+                if(!confirm("Not all questions answered. Submit anyway?")) return;
+            }
+
+            stopTimer(); // STOP TIMER
+
+            const res = await fetch(`/api/submit/${activeTestId}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answers: userAnswers })
+            });
+            const data = await res.json();
+            
+            hideAll();
+            document.getElementById('result-view').classList.remove('hidden');
+            document.getElementById('result-score').innerText = data.score;
+            document.getElementById('result-total').innerText = data.total;
+            document.getElementById('result-percent').innerText = data.percentage;
+
+            const analysisContainer = document.getElementById('analysis-container');
+            analysisContainer.innerHTML = '';
+            data.analysis.forEach((item, index) => {
+                const isCorrect = item.is_correct;
+                const colorClass = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+                analysisContainer.innerHTML += `
+                    <div class="p-5 border rounded-xl ${colorClass}">
+                        <p class="font-bold text-gray-900 mb-3">${index + 1}. ${item.question}</p>
+                        <p class="text-sm mb-1 text-gray-700"><strong>Your Answer:</strong> ${item.your_answer} ${!isCorrect ? '<span class="text-red-500 font-bold ml-2">(Incorrect)</span>' : ''}</p>
+                        ${!isCorrect ? `<p class="text-sm text-green-700 mt-2 p-2 bg-white rounded border border-green-100"><strong>Correct Answer:</strong> ${item.correct_answer}</p>` : ''}
+                    </div>`;
+            });
+        }
+    </script>
+</body>
+</html>

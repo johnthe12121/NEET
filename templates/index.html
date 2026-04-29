@@ -107,33 +107,70 @@
         let timerInterval = null;
         const NEET_SECONDS = (3 * 60 * 60) + (20 * 60); // 3 hrs 20 mins
 
+        // Start checking auth on page load
         checkAuth();
 
         function hideAll() {
             ['auth-view', 'dashboard-view', 'test-view', 'result-view'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
+                const el = document.getElementById(id);
+                if(el) el.classList.add('hidden');
             });
         }
 
         async function checkAuth() {
-            const res = await fetch('/api/auth/status');
-            const data = await res.json();
-            hideAll();
-            if (data.logged_in) {
-                document.getElementById('nav-user-info').classList.remove('hidden');
-                document.getElementById('nav-username').innerText = `Hello, ${data.username}`;
-                loadDashboard();
-            } else {
-                document.getElementById('nav-user-info').classList.add('hidden');
+            try {
+                const res = await fetch('/api/auth/status');
+                
+                if (!res.ok) throw new Error("Server returned " + res.status);
+                
+                const data = await res.json();
+                hideAll();
+                
+                if (data.logged_in) {
+                    document.getElementById('nav-user-info').classList.remove('hidden');
+                    document.getElementById('nav-username').innerText = `Hello, ${data.username}`;
+                    
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const specificTestId = urlParams.get('test');
+                    
+                    if (specificTestId) {
+                        startTest(specificTestId);
+                    } else {
+                        loadDashboard();
+                    }
+                } else {
+                    document.getElementById('nav-user-info').classList.add('hidden');
+                    document.getElementById('auth-view').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error("Auth check failed:", error);
+                hideAll();
                 document.getElementById('auth-view').classList.remove('hidden');
+                document.getElementById('auth-error').innerText = "Could not connect to the server. Please check if Flask is running.";
+                document.getElementById('auth-error').classList.remove('hidden');
             }
         }
 
         async function login() {
-            const res = await fetch('/api/auth/login', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
-            });
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    if (data.is_admin) window.location.href = '/admin';
+                    else checkAuth();
+                } else {
+                    document.getElementById('auth-error').innerText = data.error;
+                    document.getElementById('auth-error').classList.remove('hidden');
+                }
+            } catch (e) {
+                document.getElementById('auth-error').innerText = "Server communication error.";
+                document.getElementById('auth-error').classList.remove('hidden');
+            }
+        }
+
         async function register() {
             const res = await fetch('/api/auth/register', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -144,61 +181,70 @@
         }
 
         async function logout() {
-            stopTimer(); // Added to ensure the timer stops and hides on logout
+            stopTimer(); // Ensure timer stops on logout
             await fetch('/api/auth/logout', { method: 'POST' });
+            
+            // Clear URL parameters so it doesn't try to load a test on next login
+            window.history.replaceState({}, document.title, "/");
             checkAuth();
         }
 
         async function loadDashboard() {
-            stopTimer(); // Ensure timer hides if returning to dashboard
+            stopTimer();
             hideAll();
-            const res = await fetch('/api/dashboard');
-            if (!res.ok) return checkAuth();
-            const data = await res.json();
+            
+            try {
+                const res = await fetch('/api/dashboard');
+                if (!res.ok) return checkAuth();
+                const data = await res.json();
 
-            const testList = document.getElementById('test-list');
-            testList.innerHTML = data.tests.length === 0 ? '<p class="text-gray-500">No tests available yet.</p>' : '';
-            data.tests.forEach(t => {
-                testList.innerHTML += `
-                    <div class="flex justify-between items-center p-4 bg-gray-50 rounded-lg border hover:border-indigo-300 transition">
-                        <div>
-                            <p class="font-bold text-gray-800">${t.title}</p>
-                            <p class="text-xs text-gray-500">Added: ${t.created_at}</p>
+                const testList = document.getElementById('test-list');
+                testList.innerHTML = data.tests.length === 0 ? '<p class="text-gray-500">No tests available yet.</p>' : '';
+                data.tests.forEach(t => {
+                    testList.innerHTML += `
+                        <div class="flex justify-between items-center p-4 bg-gray-50 rounded-lg border hover:border-indigo-300 transition">
+                            <div>
+                                <p class="font-bold text-gray-800">${t.title}</p>
+                                <p class="text-xs text-gray-500">Added: ${t.created_at}</p>
+                            </div>
+                            <button onclick="startTest('${t.id}')" class="bg-indigo-100 text-indigo-700 font-bold px-4 py-2 rounded hover:bg-indigo-200">Take Test</button>
                         </div>
-                        <button onclick="startTest('${t.id}')" class="bg-indigo-100 text-indigo-700 font-bold px-4 py-2 rounded hover:bg-indigo-200">Take Test</button>
-                    </div>
-                `;
-            });
+                    `;
+                });
 
-            const hTable = document.getElementById('history-table');
-            hTable.innerHTML = '';
-            [...data.history].reverse().forEach(h => {
-                hTable.innerHTML += `
-                    <tr class="border-b hover:bg-gray-50">
-                        <td class="p-3 text-sm">${h.date}</td>
-                        <td class="p-3 font-medium">${h.title}</td>
-                        <td class="p-3">${h.score} / ${h.total}</td>
-                        <td class="p-3 font-bold text-${h.percentage >= 80 ? 'green' : 'indigo'}-600">${h.percentage}%</td>
-                    </tr>
-                `;
-            });
+                const hTable = document.getElementById('history-table');
+                hTable.innerHTML = '';
+                [...data.history].reverse().forEach(h => {
+                    hTable.innerHTML += `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="p-3 text-sm">${h.date}</td>
+                            <td class="p-3 font-medium">${h.title}</td>
+                            <td class="p-3">${h.score} / ${h.total}</td>
+                            <td class="p-3 font-bold text-${h.percentage >= 80 ? 'green' : 'indigo'}-600">${h.percentage}%</td>
+                        </tr>
+                    `;
+                });
 
-            const ctx = document.getElementById('dashboardChart').getContext('2d');
-            if(chartInstance) chartInstance.destroy();
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: data.history.map((_, i) => `Test ${i + 1}`),
-                    datasets: [{
-                        label: 'Score %', data: data.history.map(h => h.percentage),
-                        borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.2)',
-                        borderWidth: 3, fill: true, tension: 0.4
-                    }]
-                },
-                options: { scales: { y: { beginAtZero: true, max: 100 } } }
-            });
+                const ctx = document.getElementById('dashboardChart').getContext('2d');
+                if(chartInstance) chartInstance.destroy();
+                chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.history.map((_, i) => `Test ${i + 1}`),
+                        datasets: [{
+                            label: 'Score %', data: data.history.map(h => h.percentage),
+                            borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.2)',
+                            borderWidth: 3, fill: true, tension: 0.4
+                        }]
+                    },
+                    options: { scales: { y: { beginAtZero: true, max: 100 } } }
+                });
 
-            document.getElementById('dashboard-view').classList.remove('hidden');
+                document.getElementById('dashboard-view').classList.remove('hidden');
+            } catch (e) {
+                console.error("Dashboard load failed:", e);
+                checkAuth();
+            }
         }
 
         function runTimer() {
@@ -217,7 +263,7 @@
                 if (timeRemaining <= 0) {
                     stopTimer();
                     alert("⏰ Time is up! Your test is being automatically submitted.");
-                    submitTest(true); // pass true for auto-submit
+                    submitTest(true); 
                 }
             }, 1000);
         }
@@ -230,39 +276,52 @@
         function abortTest() {
             if(confirm("Are you sure you want to exit? Your progress won't be saved.")) {
                 stopTimer();
+                window.history.replaceState({}, document.title, "/");
                 loadDashboard();
             }
         }
 
         async function startTest(id) {
             activeTestId = id;
-            const res = await fetch(`/api/test/${id}`);
-            const data = await res.json();
-            
-            hideAll();
-            currentQuestions = data.questions;
-            userAnswers = {};
-            
-            document.getElementById('test-title').innerText = data.title;
-            const container = document.getElementById('questions-container');
-            container.innerHTML = '';
-            
-            currentQuestions.forEach((q, index) => {
-                let optionsHtml = q.options.map(opt => `
-                    <label class="block p-4 border-2 border-gray-100 rounded-lg cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition mb-2">
-                        <input type="radio" name="${q.id}" value="${opt}" onchange="userAnswers['${q.id}'] = '${opt}'" class="mr-3 w-4 h-4 text-indigo-600">
-                        <span class="font-medium text-gray-700">${opt}</span>
-                    </label>
-                `).join('');
-                container.innerHTML += `
-                    <div class="bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
-                        <h3 class="text-lg font-bold mb-4 text-gray-900"><span class="text-indigo-600 mr-1">${index + 1}.</span> ${q.text}</h3>
-                        <div class="space-y-2">${optionsHtml}</div>
-                    </div>`;
-            });
-            
-            document.getElementById('test-view').classList.remove('hidden');
-            runTimer(); // START THE TIMER
+            try {
+                const res = await fetch(`/api/test/${id}`);
+                const data = await res.json();
+                
+                if(!res.ok) {
+                    alert("Test not found or has been deleted.");
+                    window.history.replaceState({}, document.title, "/");
+                    return loadDashboard();
+                }
+                
+                hideAll();
+                currentQuestions = data.questions;
+                userAnswers = {};
+                
+                document.getElementById('test-title').innerText = data.title;
+                const container = document.getElementById('questions-container');
+                container.innerHTML = '';
+                
+                currentQuestions.forEach((q, index) => {
+                    let optionsHtml = q.options.map(opt => `
+                        <label class="block p-4 border-2 border-gray-100 rounded-lg cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition mb-2">
+                            <input type="radio" name="${q.id}" value="${opt}" onchange="userAnswers['${q.id}'] = '${opt}'" class="mr-3 w-4 h-4 text-indigo-600">
+                            <span class="font-medium text-gray-700">${opt}</span>
+                        </label>
+                    `).join('');
+                    container.innerHTML += `
+                        <div class="bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
+                            <h3 class="text-lg font-bold mb-4 text-gray-900"><span class="text-indigo-600 mr-1">${index + 1}.</span> ${q.text}</h3>
+                            <div class="space-y-2">${optionsHtml}</div>
+                        </div>`;
+                });
+                
+                document.getElementById('test-view').classList.remove('hidden');
+                runTimer(); 
+            } catch (e) {
+                console.error("Test load failed:", e);
+                alert("Failed to load the test. Please try again.");
+                loadDashboard();
+            }
         }
 
         async function submitTest(autoSubmit = false) {
@@ -270,32 +329,39 @@
                 if(!confirm("Not all questions answered. Submit anyway?")) return;
             }
 
-            stopTimer(); // STOP TIMER
+            stopTimer();
 
-            const res = await fetch(`/api/submit/${activeTestId}`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ answers: userAnswers })
-            });
-            const data = await res.json();
-            
-            hideAll();
-            document.getElementById('result-view').classList.remove('hidden');
-            document.getElementById('result-score').innerText = data.score;
-            document.getElementById('result-total').innerText = data.total;
-            document.getElementById('result-percent').innerText = data.percentage;
+            try {
+                const res = await fetch(`/api/submit/${activeTestId}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ answers: userAnswers })
+                });
+                const data = await res.json();
+                
+                hideAll();
+                document.getElementById('result-view').classList.remove('hidden');
+                document.getElementById('result-score').innerText = data.score;
+                document.getElementById('result-total').innerText = data.total;
+                document.getElementById('result-percent').innerText = data.percentage;
 
-            const analysisContainer = document.getElementById('analysis-container');
-            analysisContainer.innerHTML = '';
-            data.analysis.forEach((item, index) => {
-                const isCorrect = item.is_correct;
-                const colorClass = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
-                analysisContainer.innerHTML += `
-                    <div class="p-5 border rounded-xl ${colorClass}">
-                        <p class="font-bold text-gray-900 mb-3">${index + 1}. ${item.question}</p>
-                        <p class="text-sm mb-1 text-gray-700"><strong>Your Answer:</strong> ${item.your_answer} ${!isCorrect ? '<span class="text-red-500 font-bold ml-2">(Incorrect)</span>' : ''}</p>
-                        ${!isCorrect ? `<p class="text-sm text-green-700 mt-2 p-2 bg-white rounded border border-green-100"><strong>Correct Answer:</strong> ${item.correct_answer}</p>` : ''}
-                    </div>`;
-            });
+                const analysisContainer = document.getElementById('analysis-container');
+                analysisContainer.innerHTML = '';
+                data.analysis.forEach((item, index) => {
+                    const isCorrect = item.is_correct;
+                    const colorClass = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+                    analysisContainer.innerHTML += `
+                        <div class="p-5 border rounded-xl ${colorClass}">
+                            <p class="font-bold text-gray-900 mb-3">${index + 1}. ${item.question}</p>
+                            <p class="text-sm mb-1 text-gray-700"><strong>Your Answer:</strong> ${item.your_answer} ${!isCorrect ? '<span class="text-red-500 font-bold ml-2">(Incorrect)</span>' : ''}</p>
+                            ${!isCorrect ? `<p class="text-sm text-green-700 mt-2 p-2 bg-white rounded border border-green-100"><strong>Correct Answer:</strong> ${item.correct_answer}</p>` : ''}
+                        </div>`;
+                });
+
+                window.history.replaceState({}, document.title, "/");
+            } catch (e) {
+                alert("There was an error submitting your test.");
+                console.error(e);
+            }
         }
     </script>
 </body>

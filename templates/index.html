@@ -25,19 +25,6 @@
 
     <div class="max-w-4xl mx-auto p-4 mt-6">
         
-        <!-- AUTH VIEW -->
-        <div id="auth-view" class="hidden bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto mt-10">
-            <h1 class="text-3xl font-bold text-indigo-600 mb-6 text-center">Welcome Back!</h1>
-            <div class="space-y-4">
-                <input type="text" id="username" placeholder="Username" class="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-400">
-                <input type="password" id="password" placeholder="Password" class="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-400">
-                <div class="flex space-x-4 pt-2">
-                    <button onclick="login()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow hover:bg-indigo-700 transition">Log In</button>
-                </div>
-                <p id="auth-error" class="text-red-500 text-center text-sm font-bold mt-2 hidden"></p>
-            </div>
-        </div>
-
         <!-- DASHBOARD VIEW -->
         <div id="dashboard-view" class="hidden space-y-6">
             <div class="grid md:grid-cols-2 gap-6">
@@ -111,7 +98,7 @@
         checkAuth();
 
         function hideAll() {
-            ['auth-view', 'dashboard-view', 'test-view', 'result-view'].forEach(id => {
+            ['dashboard-view', 'test-view', 'result-view'].forEach(id => {
                 const el = document.getElementById(id);
                 if(el) el.classList.add('hidden');
             });
@@ -139,54 +126,19 @@
                         loadDashboard();
                     }
                 } else {
-                    document.getElementById('nav-user-info').classList.add('hidden');
-                    document.getElementById('auth-view').classList.remove('hidden');
+                    window.location.href = '/login';
                 }
             } catch (error) {
                 console.error("Auth check failed:", error);
-                hideAll();
-                document.getElementById('auth-view').classList.remove('hidden');
-                document.getElementById('auth-error').innerText = "Could not connect to the server. Please check if Flask is running.";
-                document.getElementById('auth-error').classList.remove('hidden');
+                window.location.href = '/login';
             }
-        }
-
-        async function login() {
-            try {
-                const res = await fetch('/api/auth/login', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    if (data.is_admin) window.location.href = '/admin';
-                    else checkAuth();
-                } else {
-                    document.getElementById('auth-error').innerText = data.error;
-                    document.getElementById('auth-error').classList.remove('hidden');
-                }
-            } catch (e) {
-                document.getElementById('auth-error').innerText = "Server communication error.";
-                document.getElementById('auth-error').classList.remove('hidden');
-            }
-        }
-
-        async function register() {
-            const res = await fetch('/api/auth/register', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
-            });
-            if (res.ok) checkAuth();
-            else alert("Registration failed. Username might be taken.");
         }
 
         async function logout() {
             stopTimer(); // Ensure timer stops on logout
             await fetch('/api/auth/logout', { method: 'POST' });
             
-            // Clear URL parameters so it doesn't try to load a test on next login
-            window.history.replaceState({}, document.title, "/");
-            checkAuth();
+            window.location.href = '/login';
         }
 
         async function loadDashboard() {

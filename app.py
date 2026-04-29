@@ -2,7 +2,7 @@ import sqlite3
 import json
 import uuid
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template, session
+from flask import Flask, request, jsonify, render_template, session, redirect
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -44,10 +44,22 @@ init_db()
 # --- PAGE ROUTES ---
 @app.route('/')
 def home():
+    if 'user_id' not in session:
+        return redirect('/login')
+    if session.get('is_admin'):
+        return redirect('/admin')
     return render_template('index.html')
+
+@app.route('/login')
+def login_page():
+    if 'user_id' in session:
+        return redirect('/')
+    return render_template('login.html')
 
 @app.route('/admin')
 def admin_page():
+    if not session.get('is_admin'):
+        return redirect('/login')
     return render_template('admin.html')
 
 # --- AUTH API ---

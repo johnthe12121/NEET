@@ -100,7 +100,7 @@
             const res = await fetch('/api/auth/status');
             const data = await res.json();
             if (!data.logged_in || !data.is_admin) {
-                window.location.href = '/';
+                window.location.href = '/login';
                 return;
             }
             loadAdminData();
@@ -108,7 +108,7 @@
 
         async function logout() {
             await fetch('/api/auth/logout', { method: 'POST' });
-            window.location.href = '/';
+            window.location.href = '/login';
         }
 
         function showTab(tab) {

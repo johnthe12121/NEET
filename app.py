@@ -7,7 +7,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = 'super_secret_neet_key_replace_me_in_production'
-app.permanent_session_lifetime = timedelta(days=7)
 
 DATABASE = 'neet_app.db'
 
@@ -84,7 +83,6 @@ def register():
                           (username, generate_password_hash(password)))
     conn.commit()
     
-    session.permanent = True
     session['user_id'] = cursor.lastrowid
     session['username'] = username
     session['is_admin'] = 0
@@ -99,7 +97,6 @@ def login():
     conn.close()
     
     if user and check_password_hash(user['password'], data.get('password')):
-        session.permanent = True
         session['user_id'] = user['id']
         session['username'] = user['username']
         session['is_admin'] = user['is_admin']

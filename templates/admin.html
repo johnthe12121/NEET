@@ -97,17 +97,23 @@
         let adminChart = null;
 
         async function initAdmin() {
-            const res = await fetch('/api/auth/status');
-            const data = await res.json();
-            if (!data.logged_in || !data.is_admin) {
+            try {
+                // Strict no-store cache to prevent browser confusion after logging out
+                const res = await fetch('/api/auth/status', { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.logged_in || !data.is_admin) {
+                    window.location.href = '/login';
+                    return;
+                }
+                loadAdminData();
+            } catch (e) {
+                console.error("Auth check failed:", e);
                 window.location.href = '/login';
-                return;
             }
-            loadAdminData();
         }
 
         async function logout() {
-            await fetch('/api/auth/logout', { method: 'POST' });
+            await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' });
             window.location.href = '/login';
         }
 
@@ -118,10 +124,19 @@
         }
 
         async function loadAdminData() {
-            const res = await fetch('/api/admin/data');
-            adminData = await res.json();
-            renderTestsTable();
-            renderUsersList();
+            try {
+                const res = await fetch('/api/admin/data', { cache: 'no-store' });
+                if (!res.ok) {
+                    alert("Server error occurred while loading admin data.");
+                    return;
+                }
+                adminData = await res.json();
+                renderTestsTable();
+                renderUsersList();
+            } catch (e) {
+                console.error("Failed to load admin data", e);
+                alert("Network error: Could not load the admin dashboard.");
+            }
         }
 
         function renderTestsTable() {

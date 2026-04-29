@@ -106,7 +106,8 @@
 
         async function checkAuth() {
             try {
-                const res = await fetch('/api/auth/status');
+                // cache: 'no-store' prevents the browser from saving old admin states
+                const res = await fetch('/api/auth/status', { cache: 'no-store' });
                 
                 if (!res.ok) throw new Error("Server returned " + res.status);
                 
@@ -146,8 +147,14 @@
             hideAll();
             
             try {
-                const res = await fetch('/api/dashboard');
-                if (!res.ok) return checkAuth();
+                const res = await fetch('/api/dashboard', { cache: 'no-store' });
+                
+                // STOP THE BLANK SCREEN INFINITE LOOP!
+                if (!res.ok) {
+                    document.getElementById('dashboard-view').innerHTML = `<p class="text-red-600 font-bold text-center p-10 bg-white rounded-xl shadow mt-10">Error loading dashboard data. Server might be updating. Please log out and try again.</p>`;
+                    document.getElementById('dashboard-view').classList.remove('hidden');
+                    return; 
+                }
                 const data = await res.json();
 
                 const testList = document.getElementById('test-list');
@@ -195,7 +202,9 @@
                 document.getElementById('dashboard-view').classList.remove('hidden');
             } catch (e) {
                 console.error("Dashboard load failed:", e);
-                checkAuth();
+                // Fail gracefully instead of looping forever
+                document.getElementById('dashboard-view').innerHTML = `<p class="text-red-600 font-bold text-center p-10 bg-white rounded-xl shadow mt-10">Network error. Please check your connection and refresh the page.</p>`;
+                document.getElementById('dashboard-view').classList.remove('hidden');
             }
         }
 
@@ -236,7 +245,7 @@
         async function startTest(id) {
             activeTestId = id;
             try {
-                const res = await fetch(`/api/test/${id}`);
+                const res = await fetch(`/api/test/${id}`, { cache: 'no-store' });
                 const data = await res.json();
                 
                 if(!res.ok) {

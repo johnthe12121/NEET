@@ -1,44 +1,64 @@
-import sqlite3
+import os
 import json
 import uuid
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, session, redirect
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+# Load environment variables from a hidden .env file (if it exists)
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_neet_key_replace_me_in_production'
+app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_neet_key_replace_me_in_production')
 
-DATABASE = 'neet_app.db'
+# Safely fetch the URL without hardcoding it in the script
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
+    # Connect to the remote PostgreSQL database
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def init_db():
+    if not DATABASE_URL:
+        print("WARNING: No DATABASE_URL found. Please set it in your .env file or Render dashboard!")
+        return
+
     conn = get_db_connection()
-    conn.execute('''CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # PostgreSQL uses SERIAL for auto-incrementing primary keys
+    cur.execute('''CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
                         username TEXT UNIQUE NOT NULL,
                         password TEXT NOT NULL,
                         is_admin INTEGER DEFAULT 0,
                         history TEXT DEFAULT '[]'
                     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS tests (
+    cur.execute('''CREATE TABLE IF NOT EXISTS tests (
                         id TEXT PRIMARY KEY,
                         title TEXT NOT NULL,
                         data TEXT NOT NULL,
                         created_at TEXT NOT NULL
                     )''')
     
-    admin = conn.execute('SELECT * FROM users WHERE username = ?', ('admin',)).fetchone()
+    # Check for default admin
+    cur.execute('SELECT * FROM users WHERE username = %s', ('admin',))
+    admin = cur.fetchone()
     if not admin:
-        conn.execute('INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)',
+        cur.execute('INSERT INTO users (username, password, is_admin) VALUES (%s, %s, 1)',
                      ('admin', generate_password_hash('admin123')))
+    
     conn.commit()
+    cur.close()
     conn.close()
 
-init_db()
+# Initialize the PostgreSQL tables on startup
+if DATABASE_URL:
+    init_db()
 
 # --- PAGE ROUTES ---
 @app.route('/')
@@ -75,25 +95,37 @@ def register():
     password = data.get('password')
     
     conn = get_db_connection()
-    if conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone():
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('SELECT * FROM users WHERE username = %s', (username,))
+    if cur.fetchone():
+        cur.close()
         conn.close()
         return jsonify({"error": "Username already exists"}), 400
         
-    cursor = conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', 
+    # PostgreSQL uses RETURNING id to get the generated ID
+    cur.execute('INSERT INTO users (username, password) VALUES (%s, %s) RETURNING id', 
                           (username, generate_password_hash(password)))
+    user_id = cur.fetchone()['id']
     conn.commit()
     
-    session['user_id'] = cursor.lastrowid
+    session['user_id'] = user_id
     session['username'] = username
     session['is_admin'] = 0
+    cur.close()
     conn.close()
+    
     return jsonify({"message": "Registration successful"})
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
+    
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (data.get('username'),)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute('SELECT * FROM users WHERE username = %s', (data.get('username'),))
+    user = cur.fetchone()
+    cur.close()
     conn.close()
     
     if user and check_password_hash(user['password'], data.get('password')):
@@ -101,6 +133,7 @@ def login():
         session['username'] = user['username']
         session['is_admin'] = user['is_admin']
         return jsonify({"message": "Logged in", "is_admin": user['is_admin']})
+        
     return jsonify({"error": "Invalid credentials"}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -114,8 +147,15 @@ def student_dashboard():
     if 'user_id' not in session: return jsonify({"error": "Unauthorized"}), 401
     
     conn = get_db_connection()
-    tests = conn.execute('SELECT id, title, created_at FROM tests ORDER BY created_at DESC').fetchall()
-    user = conn.execute('SELECT history FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('SELECT id, title, created_at FROM tests ORDER BY created_at DESC')
+    tests = cur.fetchall()
+    
+    cur.execute('SELECT history FROM users WHERE id = %s', (session['user_id'],))
+    user = cur.fetchone()
+    
+    cur.close()
     conn.close()
     
     return jsonify({
@@ -128,7 +168,12 @@ def get_test(test_id):
     if 'user_id' not in session: return jsonify({"error": "Unauthorized"}), 401
     
     conn = get_db_connection()
-    test = conn.execute('SELECT * FROM tests WHERE id = ?', (test_id,)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('SELECT * FROM tests WHERE id = %s', (test_id,))
+    test = cur.fetchone()
+    
+    cur.close()
     conn.close()
     
     if not test: return jsonify({"error": "Test not found"}), 404
@@ -142,8 +187,13 @@ def submit_test(test_id):
     if 'user_id' not in session: return jsonify({"error": "Unauthorized"}), 401
 
     conn = get_db_connection()
-    test = conn.execute('SELECT * FROM tests WHERE id = ?', (test_id,)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('SELECT * FROM tests WHERE id = %s', (test_id,))
+    test = cur.fetchone()
+    
     if not test: 
+        cur.close()
         conn.close()
         return jsonify({"error": "Test not found"}), 404
 
@@ -162,7 +212,8 @@ def submit_test(test_id):
         
     percentage = round((correct_count / len(questions)) * 100, 2)
     
-    user = conn.execute('SELECT history FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    cur.execute('SELECT history FROM users WHERE id = %s', (session['user_id'],))
+    user = cur.fetchone()
     history = json.loads(user['history']) if user['history'] else []
     
     history_entry = {
@@ -175,8 +226,10 @@ def submit_test(test_id):
     }
     history.append(history_entry)
     
-    conn.execute('UPDATE users SET history = ? WHERE id = ?', (json.dumps(history), session['user_id']))
+    cur.execute('UPDATE users SET history = %s WHERE id = %s', (json.dumps(history), session['user_id']))
     conn.commit()
+    
+    cur.close()
     conn.close()
 
     return jsonify({"score": correct_count, "total": len(questions), "percentage": percentage, 
@@ -188,8 +241,15 @@ def admin_data():
     if not session.get('is_admin'): return jsonify({"error": "Unauthorized"}), 403
     
     conn = get_db_connection()
-    tests = conn.execute('SELECT id, title, created_at FROM tests ORDER BY created_at DESC').fetchall()
-    users = conn.execute('SELECT id, username, history FROM users WHERE is_admin = 0').fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('SELECT id, title, created_at FROM tests ORDER BY created_at DESC')
+    tests = cur.fetchall()
+    
+    cur.execute('SELECT id, username, history FROM users WHERE is_admin = 0')
+    users = cur.fetchall()
+    
+    cur.close()
     conn.close()
     
     return jsonify({
@@ -206,9 +266,13 @@ def add_test():
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     conn = get_db_connection()
-    conn.execute('INSERT INTO tests (id, title, data, created_at) VALUES (?, ?, ?, ?)',
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('INSERT INTO tests (id, title, data, created_at) VALUES (%s, %s, %s, %s)',
                  (test_id, data['title'], json.dumps(data['questions']), created_at))
     conn.commit()
+    
+    cur.close()
     conn.close()
     return jsonify({"message": "Test created", "test_id": test_id})
 
@@ -217,14 +281,17 @@ def delete_test(test_id):
     if not session.get('is_admin'): return jsonify({"error": "Unauthorized"}), 403
     
     conn = get_db_connection()
-    conn.execute('DELETE FROM tests WHERE id = ?', (test_id,))
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cur.execute('DELETE FROM tests WHERE id = %s', (test_id,))
     conn.commit()
+    
+    cur.close()
     conn.close()
     return jsonify({"message": "Test deleted"})
 
 @app.route('/api/admin/users', methods=['POST'])
 def add_user():
-    """Admin endpoint to create user accounts manually"""
     if not session.get('is_admin'): return jsonify({"error": "Unauthorized"}), 403
     
     data = request.json
@@ -232,15 +299,20 @@ def add_user():
     password = data.get('password')
     
     conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', 
+        cur.execute('INSERT INTO users (username, password) VALUES (%s, %s)', 
                      (username, generate_password_hash(password)))
         conn.commit()
         return jsonify({"message": "User created successfully"})
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         return jsonify({"error": "Username already exists"}), 400
     finally:
+        cur.close()
         conn.close()
 
 if __name__ == '__main__':
+    if not DATABASE_URL:
+        print("CRITICAL: You must set the DATABASE_URL environment variable to run this app!")
     app.run(debug=True, port=5000)
